@@ -1,6 +1,67 @@
-use std::collections::HashMap;
-
 use itertools::Itertools;
+
+fn main() {
+    let input = std::fs::read_to_string("input1.txt").unwrap();
+    let (instr, twists) = input.split_once("\n\n").unwrap();
+    let instr = instr
+        .trim()
+        .lines()
+        .map(|l| {
+            let (cmd, val) = l.split_once(" - VALUE ").unwrap();
+            let cmd = match &cmd[..4] {
+                "FACE" => Instruction::Face(val.parse().unwrap()),
+                "ROW " => Instruction::Row(cmd[4..].parse::<usize>().unwrap() - 1, val.parse().unwrap()),
+                "COL " => Instruction::Col(cmd[4..].parse::<usize>().unwrap() - 1, val.parse().unwrap()),
+                _ => unreachable!(),
+            };
+            cmd
+        })
+        .collect::<Vec<_>>();
+
+    let mut cube: Cube<80> = Cube::new_p1();
+    twists
+        .trim()
+        .as_bytes()
+        .iter()
+        .zip(&instr[..instr.len() - 1])
+        .for_each(|(twist, i)| {
+            cube.apply_instr_p1(i);
+            cube.rotate(*twist);
+        });
+    cube.apply_instr_p1(instr.last().unwrap());
+    let p1 = cube.two_highest_absorptions_product();
+    println!("p1: {}", p1);
+
+    // p2
+    let mut cube: Cube<80> = Cube::new_p2();
+    twists
+        .trim()
+        .as_bytes()
+        .iter()
+        .zip(&instr[..instr.len() - 1])
+        .for_each(|(twist, i)| {
+            cube.apply_instr_p2(i);
+            cube.rotate(*twist);
+        });
+    cube.apply_instr_p2(instr.last().unwrap());
+    let p2 = cube.dominant_sum_product();
+    println!("p2: {}", p2);
+
+    // p3
+    let mut cube: Cube<80> = Cube::new_p2();
+    twists
+        .trim()
+        .as_bytes()
+        .iter()
+        .zip(&instr[..instr.len() - 1])
+        .for_each(|(twist, i)| {
+            cube.apply_instr_p3(i);
+            cube.rotate(*twist);
+        });
+    cube.apply_instr_p3(instr.last().unwrap());
+    let p3 = cube.dominant_sum_product();
+    println!("p3: {}", p3);
+}
 
 #[derive(Debug)]
 enum Instruction {
@@ -35,10 +96,8 @@ impl<const N: usize> Face<N> {
             }
             self.grid = new_grid;
             self.cons.rotate_right(1);
-            println!("rotated cons: {:?}", self.cons);
         }
-        self.rot += n;
-        println!("rotated right by {} to {}", n, self.rot);
+        self.rot = (self.rot + n) % 4;
     }
 
     fn rot_left(&mut self, n: usize) {
@@ -95,18 +154,17 @@ impl<const N: usize> Cube<N> {
     }
 
     fn apply_instr_p1(&mut self, instruction: &Instruction) {
-        println!("Applying instruction: {:?}", instruction);
         let cf = &mut self.cur_face;
         match instruction {
-            Instruction::Face(val) => cf.grid[0][0] += N * N * val,
-            Instruction::Row(_, val) => cf.grid[0][0] += N * val,
-            Instruction::Col(_, val) => cf.grid[0][0] += N * val,
+            Instruction::Face(val) => cf.grid.iter_mut().for_each(|row| row.iter_mut().for_each(|u| *u += N * N * val)),
+            Instruction::Row(_, val) | Instruction::Col(_, val) => {
+                cf.grid.iter_mut().for_each(|row| row.iter_mut().for_each(|u| *u += N * val))
+            }
         }
-        self.correct();
+        self.copy_back();
     }
 
     fn apply_instr_p2(&mut self, instruction: &Instruction) {
-        println!("Applying instruction: {:?}", instruction);
         let cf = &mut self.cur_face;
         match instruction {
             Instruction::Face(val) => cf.grid.iter_mut().for_each(|row| row.iter_mut().for_each(|u| *u += val)),
@@ -115,6 +173,22 @@ impl<const N: usize> Cube<N> {
         }
         self.correct();
         self.copy_back();
+    }
+
+    fn apply_instr_p3(&mut self, instruction: &Instruction) {
+        if let Instruction::Face(_) = instruction {
+            self.apply_instr_p2(instruction);
+        } else if let Instruction::Row(_, _) = instruction {
+            for _ in 0..4 {
+                self.apply_instr_p2(instruction);
+                self.rotate(b'R');
+            }
+        } else if let Instruction::Col(_, _) = instruction {
+            for _ in 0..4 {
+                self.apply_instr_p2(instruction);
+                self.rotate(b'U');
+            }
+        }
     }
 
     fn correct(&mut self) {
@@ -139,7 +213,6 @@ impl<const N: usize> Cube<N> {
         let mut nf = self.faces[self.cur_face.cons[0]];
         match dir {
             b'L' => {
-                println!("Left");
                 match self.cur_idx {
                     0 => match f.cons[0] {
                         4 | 1 | 5 => nf.rot_right(1),
@@ -178,7 +251,6 @@ impl<const N: usize> Cube<N> {
                 self.cur_idx = self.cur_face.cons[0];
             }
             b'R' => {
-                println!("Right");
                 nf = self.faces[self.cur_face.cons[2]];
                 match self.cur_idx {
                     0 => match f.cons[2] {
@@ -218,7 +290,6 @@ impl<const N: usize> Cube<N> {
                 self.cur_idx = self.cur_face.cons[2];
             }
             b'U' => {
-                println!("Up");
                 nf = self.faces[self.cur_face.cons[1]];
                 match self.cur_idx {
                     0 => match f.cons[1] {
@@ -258,7 +329,6 @@ impl<const N: usize> Cube<N> {
                 self.cur_idx = self.cur_face.cons[1];
             }
             b'D' => {
-                println!("Down");
                 nf = self.faces[self.cur_face.cons[3]];
                 match self.cur_idx {
                     0 => match f.cons[3] {
@@ -299,22 +369,17 @@ impl<const N: usize> Cube<N> {
             }
             _ => unreachable!(),
         }
-        // set new current
-        self.cur_face = nf;
-        println!("cur idx: {} , cur rot: {}", self.cur_idx, self.cur_face.rot);
-        // self.print_faces();
+        self.cur_face = nf; // set new current
     }
 
-    fn p1(&self) {
-        let p1 = self
-            .faces
+    fn two_highest_absorptions_product(&self) -> usize {
+        self.faces
             .iter()
             .map(|&face| face.grid[0][0])
             .sorted()
             .rev()
             .take(2)
-            .product::<usize>();
-        println!("p1: {}", p1);
+            .product::<usize>()
     }
 
     fn dominant_sum(&self, grid: &[[usize; N]; N]) -> usize {
@@ -323,62 +388,10 @@ impl<const N: usize> Cube<N> {
         row_max.max(col_max)
     }
 
-    fn p2(&self) {
-        let p2 = self
-            .faces
+    fn dominant_sum_product(&self) -> i128 {
+        self.faces
             .iter()
             .map(|&face| self.dominant_sum(&face.grid) as i128)
-            .product::<i128>();
-        println!("p2: {}", p2);
+            .product::<i128>()
     }
-}
-
-fn main() {
-    let input = std::fs::read_to_string("input1.txt").unwrap();
-    let (instr, twists) = input.split_once("\n\n").unwrap();
-    let instr = instr
-        .trim()
-        .lines()
-        .map(|l| {
-            let (cmd, val) = l.split_once(" - VALUE ").unwrap();
-            let cmd = match &cmd[..4] {
-                "FACE" => Instruction::Face(val.parse().unwrap()),
-                "ROW " => Instruction::Row(cmd[4..].parse::<usize>().unwrap() - 1, val.parse().unwrap()),
-                "COL " => Instruction::Col(cmd[4..].parse::<usize>().unwrap() - 1, val.parse().unwrap()),
-                _ => unreachable!(),
-            };
-            cmd
-        })
-        .collect::<Vec<_>>();
-
-    let mut cube: Cube<3> = Cube::new_p1();
-    // cube.print_faces();
-    // twists
-    //     .trim()
-    //     .as_bytes()
-    //     .iter()
-    //     .zip(&instr[..instr.len() - 1])
-    //     .for_each(|(twist, i)| {
-    //         cube.apply_instr_p1(i);
-    //         cube.rotate(*twist);
-    //     });
-    // cube.apply_instr_p1(instr.last().unwrap());
-    // cube.p1();
-
-    let mut cube: Cube<80> = Cube::new_p2();
-    println!("cube: {:?}", &cube);
-    twists
-        .trim()
-        .as_bytes()
-        .iter()
-        .zip(&instr[..instr.len() - 1])
-        .for_each(|(twist, i)| {
-            cube.apply_instr_p2(i);
-            // println!("cube: {:?}", &cube);
-            cube.rotate(*twist);
-        });
-    cube.apply_instr_p2(instr.last().unwrap());
-    cube.faces[cube.cur_idx] = cube.cur_face;
-    // println!("cube: {:?}", &cube);
-    cube.p2();
 }
